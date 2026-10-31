@@ -18,3 +18,30 @@
 .prize-preview{height:145px;border-radius:13px;overflow:hidden;background:#111b32;display:grid;place-items:center;color:#aeb9d2;font-size:13px}
 .prize-preview img{width:100%;height:100%;object-fit:cover}
 .prize-upload .btn{font-size:12px}
+
+
+/* Checkbox de aceptación de condiciones */
+input[type="checkbox"] {
+    appearance: auto !important;
+    -webkit-appearance: checkbox !important;
+
+    width: 22px !important;
+    height: 22px !important;
+    min-width: 22px !important;
+    min-height: 22px !important;
+
+    accent-color: #7061ee;
+    cursor: pointer;
+    flex-shrink: 0;
+    margin: 0;
+}
+
+/* Alineación y comodidad en móviles */
+@media (max-width: 600px) {
+    input[type="checkbox"] {
+        width: 26px !important;
+        height: 26px !important;
+        min-width: 26px !important;
+        min-height: 26px !important;
+    }
+}
