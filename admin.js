@@ -1,6 +1,42 @@
 let items=[],selectedId=null,requests=[];
 const fields=['title','number_count','ticket_price','status','description','prize1','prize2','prize3','draw_at','bank_name','beneficiary','clabe','payment_note'];
-function fill(r){const form=$('raffleForm');for(const name of fields){const el=form.elements.namedItem(name);el.value=(r?.[name]??(name==='number_count'?50:name==='status'?'draft':''));if(name==='draw_at'&&r?.draw_at)el.value=new Date(new Date(r.draw_at).getTime()-new Date(r.draw_at).getTimezoneOffset()*60000).toISOString().slice(0,16);}$('editorTitle').textContent=r?'Editar rifa: '+r.title:'Crear nueva rifa';}
+const prizeImageKeys=['prize1_image','prize2_image','prize3_image'];
+let prizeImages={};
+function refreshPrizePreview(i){
+ const key=`prize${i}_image`,target=$(`prize${i}Preview`),url=prizeImages[key];
+ target.replaceChildren();target.classList.toggle('empty',!url);
+ if(url){const img=make('img');img.src=url;img.alt=`Imagen del premio ${i}`;img.loading='lazy';target.append(img);}
+ else target.textContent='Sin imagen';
+}
+function resetPrizeImages(r){
+ prizeImages={};for(let i=1;i<=3;i++){
+  const key=`prize${i}_image`;prizeImages[key]=r?.[key]||null;
+  $(`prize${i}File`).value='';refreshPrizePreview(i);
+ }
+}
+async function uploadPrizeImage(i,file){
+ const allowed={'image/jpeg':'jpg','image/png':'png','image/webp':'webp'};
+ if(!allowed[file.type])throw Error(`Premio ${i}: usa una imagen JPG, PNG o WebP.`);
+ if(file.size>5*1024*1024)throw Error(`Premio ${i}: la imagen debe pesar menos de 5 MB.`);
+ const extension=allowed[file.type];
+ const path=`${crypto.randomUUID()}.${extension}`;
+ const {error}=await db.storage.from('raffle-prizes').upload(path,file,{contentType:file.type,upsert:false});
+ if(error)throw Error(`No se pudo subir la imagen ${i}: ${error.message}`);
+ const {data}=db.storage.from('raffle-prizes').getPublicUrl(path);
+ return data.publicUrl;
+}
+for(let i=1;i<=3;i++){
+ $(`prize${i}File`).addEventListener('change',()=>{
+  const f=$(`prize${i}File`).files[0];if(!f)return;
+  const allowed=['image/jpeg','image/png','image/webp'];
+  if(!allowed.includes(f.type)||f.size>5*1024*1024){notify('Imagen inválida. Selecciona JPG, PNG o WebP de máximo 5 MB.','error');$(`prize${i}File`).value='';return;}
+  const target=$(`prize${i}Preview`);target.replaceChildren();target.classList.remove('empty');
+  const img=make('img');img.src=URL.createObjectURL(f);img.alt=`Vista previa premio ${i}`;
+  img.onload=()=>URL.revokeObjectURL(img.src);target.append(img);
+ });
+ $(`prize${i}Remove`).onclick=()=>{prizeImages[`prize${i}_image`]=null;$(`prize${i}File`).value='';refreshPrizePreview(i);};
+}
+function fill(r){const form=$('raffleForm');for(const name of fields){const el=form.elements.namedItem(name);el.value=(r?.[name]??(name==='number_count'?50:name==='status'?'draft':''));if(name==='draw_at'&&r?.draw_at)el.value=new Date(new Date(r.draw_at).getTime()-new Date(r.draw_at).getTimezoneOffset()*60000).toISOString().slice(0,16);}$('editorTitle').textContent=r?'Editar rifa: '+r.title:'Crear nueva rifa';resetPrizeImages(r);}
 async function checkSession(){if(!db){notify('Configura config.js con los datos de Supabase.','error');return;}const {data:{session}}=await db.auth.getSession();if(!session){$('loginPanel').classList.remove('hidden');$('adminContent').classList.add('hidden');$('logout').classList.add('hidden');return;}try{const ok=await call('is_admin');if(!ok)throw Error('Tu cuenta no está autorizada como administradora.');$('loginPanel').classList.add('hidden');$('adminContent').classList.remove('hidden');$('logout').classList.remove('hidden');await loadAdmin();}catch(e){notify(errorMessage(e),'error');$('loginPanel').classList.remove('hidden');$('adminContent').classList.add('hidden');}}
 function showList(){selectedId=null;$('raffleEditView').classList.add('hidden');$('raffleListView').classList.remove('hidden');renderRaffleCards();clearNotice();}
 function showEditor(id=null){selectedId=id;const r=items.find(x=>x.id===id)||null;$('raffleListView').classList.add('hidden');$('raffleEditView').classList.remove('hidden');$('deleteRaffle').classList.toggle('hidden',!r);$('bookingsPanel').classList.toggle('hidden',!r);fill(r);if(r)loadRequests().catch(e=>notify(errorMessage(e),'error'));else{requests=[];renderRequests();}clearNotice();}
@@ -17,5 +53,10 @@ $('backToList').onclick=showList;
 $('newRaffle').onclick=()=>showEditor();
 $('reloadBookings').onclick=async()=>{try{await loadRequests();notify('Participantes actualizados.','success');}catch(e){notify(errorMessage(e),'error');}};
 $('deleteRaffle').onclick=async()=>{const r=items.find(x=>x.id===selectedId);if(!r)return;const count=requests.length;const accepted=await dialogBox({title:'Eliminar rifa definitivamente',message:`Eliminarás «${r.title}» y sus ${count} solicitudes, incluidos los pagos confirmados. Esta acción no se puede deshacer.`,confirmText:'Eliminar rifa',danger:true,requireText:'ELIMINAR'});if(!accepted)return;const btn=$('deleteRaffle');btn.disabled=true;try{await call('admin_delete_raffle',{p_raffle:r.id});items=await call('admin_list_raffles');showList();notify('La rifa y sus solicitudes se eliminaron correctamente.','success');}catch(e){notify(errorMessage(e),'error');}finally{btn.disabled=false;}};
-$('raffleForm').onsubmit=async e=>{e.preventDefault();const btn=$('saveRaffle');btn.disabled=true;try{const form=$('raffleForm');const v={};for(const name of fields)v[name]=form.elements.namedItem(name).value.trim();v.number_count=Number(v.number_count);v.ticket_price=Number(v.ticket_price);v.draw_at=v.draw_at?new Date(v.draw_at).toISOString():null;const id=await call('admin_save_raffle',{p_id:selectedId,p_data:v});items=await call('admin_list_raffles');showEditor(id);notify('Rifa guardada correctamente.','success');}catch(e){notify(errorMessage(e),'error');}finally{btn.disabled=false;}};
+$('raffleForm').onsubmit=async e=>{e.preventDefault();const btn=$('saveRaffle');btn.disabled=true;try{const form=$('raffleForm');const v={};for(const name of fields)v[name]=form.elements.namedItem(name).value.trim();v.number_count=Number(v.number_count);v.ticket_price=Number(v.ticket_price);v.draw_at=v.draw_at?new Date(v.draw_at).toISOString():null;
+for(let i=1;i<=3;i++){
+ const file=$(`prize${i}File`).files[0],key=`prize${i}_image`;
+ v[key]=file?await uploadPrizeImage(i,file):prizeImages[key];
+}
+const id=await call('admin_save_raffle',{p_id:selectedId,p_data:v});items=await call('admin_list_raffles');showEditor(id);notify('Rifa guardada correctamente.','success');}catch(e){notify(errorMessage(e),'error');}finally{btn.disabled=false;}};
 checkSession();
